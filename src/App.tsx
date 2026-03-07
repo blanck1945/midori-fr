@@ -306,6 +306,13 @@ function LoginScreen({
               <Btn type="submit" disabled={busy} className="mt-1 w-full py-3 text-base font-bold">
                 {busy ? '...' : mode === 'login' ? 'Ingresar' : 'Crear cuenta'}
               </Btn>
+              {import.meta.env.DEV && (
+                <button type="button"
+                  onClick={() => { setMode('login'); setEmail('demo@midori.app'); setPassword('demo1234') }}
+                  className="text-xs text-dim hover:text-muted transition cursor-pointer text-center w-full">
+                  Usar credenciales de test
+                </button>
+              )}
               {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
             </form>
           </Card>
