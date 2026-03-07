@@ -308,7 +308,21 @@ function LoginScreen({
               </Btn>
               {import.meta.env.DEV && (
                 <button type="button"
-                  onClick={() => { setMode('login'); setEmail('demo@midori.app'); setPassword('demo1234') }}
+                  onClick={async () => {
+                    setBusy(true)
+                    setError(null)
+                    try {
+                      await onLogin('demo@midori.app', 'demo1234')
+                    } catch {
+                      try {
+                        await onRegister('demo@midori.app', 'Demo User', 'demo1234')
+                      } catch (err) {
+                        setError(String(err))
+                      }
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}
                   className="text-xs text-dim hover:text-muted transition cursor-pointer text-center w-full">
                   Usar credenciales de test
                 </button>
