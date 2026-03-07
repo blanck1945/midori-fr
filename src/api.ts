@@ -26,10 +26,16 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 }
 
 export const api = {
-  login(email: string, name: string) {
-    return request<LoginResponse>('/auth/dev-login', {
+  login(email: string, password: string) {
+    return request<LoginResponse>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, name }),
+      body: JSON.stringify({ email, password }),
+    })
+  },
+  register(email: string, name: string, password: string) {
+    return request<LoginResponse>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, name, password }),
     })
   },
   getDashboard(token: string) {

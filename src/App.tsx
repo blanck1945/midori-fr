@@ -228,17 +228,35 @@ function GardenBg({ background }: { background: string }) {
 
 /* ─── Login ──────────────────────────────────────────────────────────────── */
 
-function LoginScreen({ onLogin, gardenBackground }: { onLogin: (email: string, name: string) => Promise<void>; gardenBackground: string }) {
-  const [email, setEmail] = useState('demo@midori.app')
-  const [name, setName] = useState('Usuario Demo')
+function LoginScreen({
+  onLogin, onRegister, gardenBackground,
+}: {
+  onLogin: (email: string, password: string) => Promise<void>
+  onRegister: (email: string, name: string, password: string) => Promise<void>
+  gardenBackground: string
+}) {
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
+  const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    try { setBusy(true); setError(null); await onLogin(email, name) }
-    catch (err) { setError(String(err)) }
-    finally { setBusy(false) }
+    try {
+      setBusy(true)
+      setError(null)
+      if (mode === 'login') {
+        await onLogin(email, password)
+      } else {
+        await onRegister(email, name, password)
+      }
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -261,15 +279,32 @@ function LoginScreen({ onLogin, gardenBackground }: { onLogin: (email: string, n
             </div>
           </div>
           <Card>
+            {/* Toggle */}
+            <div className="mb-4 flex rounded-xl border border-border bg-surface-alt p-1">
+              <button type="button" onClick={() => { setMode('login'); setError(null) }}
+                className={`flex-1 rounded-lg py-2 text-sm font-semibold transition cursor-pointer ${mode === 'login' ? 'bg-surface text-strong shadow-sm' : 'text-muted hover:text-strong'}`}>
+                Ingresar
+              </button>
+              <button type="button" onClick={() => { setMode('register'); setError(null) }}
+                className={`flex-1 rounded-lg py-2 text-sm font-semibold transition cursor-pointer ${mode === 'register' ? 'bg-surface text-strong shadow-sm' : 'text-muted hover:text-strong'}`}>
+                Registrarse
+              </button>
+            </div>
+
             <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
               <Field label="Email">
                 <Input value={email} onChange={setEmail} placeholder="tu@email.com" type="email" />
               </Field>
-              <Field label="Nombre">
-                <Input value={name} onChange={setName} placeholder="Tu nombre" />
+              {mode === 'register' && (
+                <Field label="Nombre">
+                  <Input value={name} onChange={setName} placeholder="Tu nombre" />
+                </Field>
+              )}
+              <Field label="Contraseña">
+                <Input value={password} onChange={setPassword} placeholder="••••••••" type="password" />
               </Field>
               <Btn type="submit" disabled={busy} className="mt-1 w-full py-3 text-base font-bold">
-                {busy ? 'Ingresando...' : 'Ingresar'}
+                {busy ? '...' : mode === 'login' ? 'Ingresar' : 'Crear cuenta'}
               </Btn>
               {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
             </form>
@@ -327,8 +362,14 @@ export default function App() {
     refreshData().catch((err) => setError(String(err)))
   }, [authToken])
 
-  const handleLogin = async (email: string, name: string) => {
-    const result = await api.login(email, name)
+  const handleLogin = async (email: string, password: string) => {
+    const result = await api.login(email, password)
+    setAuthToken(result.token)
+    setUser(result.user)
+  }
+
+  const handleRegister = async (email: string, name: string, password: string) => {
+    const result = await api.register(email, name, password)
     setAuthToken(result.token)
     setUser(result.user)
   }
@@ -403,7 +444,7 @@ export default function App() {
   ], [dashboard?.plants.length, tasksToday.length, dashboard?.criticalAlerts.length])
 
   if (!authToken) {
-    return <LoginScreen onLogin={handleLogin} gardenBackground={gardenBackground} />
+    return <LoginScreen onLogin={handleLogin} onRegister={handleRegister} gardenBackground={gardenBackground} />
   }
 
   const tabs: { key: Tab; label: string }[] = [
