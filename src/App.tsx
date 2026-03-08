@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from './api'
-import type { CareTask, DashboardData, ProgressSnapshot, User } from './types'
+import type { CareTask, Diagnosis, DashboardData, Plant, ProgressSnapshot, User } from './types'
 
-type Tab = 'home' | 'tasks' | 'progress'
+type Tab = 'home' | 'tasks' | 'progress' | 'settings'
+type Language = 'es' | 'en' | 'pt'
+
+const LANGUAGE_LABELS: Record<Language, string> = {
+  es: 'Español',
+  en: 'English',
+  pt: 'Português',
+}
 
 // Resize to max 1024px on longest side, JPEG 80% — enough for Gemini plant ID
 function resizeImage(file: File, maxPx = 1024, quality = 0.8): Promise<string> {
@@ -215,6 +222,234 @@ function EmptyState({ emoji, text }: { emoji: string; text: string }) {
   )
 }
 
+/* ─── Plant Detail Page ──────────────────────────────────────────────────── */
+
+const CATEGORY_ICON: Record<string, string> = {
+  watering: '💧',
+  inspection: '🔍',
+  fertilizing: '🌿',
+  recovery: '🚑',
+  other: '📋',
+}
+
+const SEVERITY_COLOR = {
+  low: 'primary' as const,
+  medium: 'warning' as const,
+  high: 'danger' as const,
+}
+
+const SEVERITY_LABEL = { low: 'Leve', medium: 'Moderado', high: 'Grave' }
+
+function PlantDetailPage({
+  data, onBack, onTaskDone, onTaskSkip, busy,
+}: {
+  data: { plant: Plant; tasks: CareTask[]; diagnoses: Diagnosis[] }
+  onBack: () => void
+  onTaskDone: (taskId: string) => Promise<void>
+  onTaskSkip: (taskId: string) => Promise<void>
+  busy: boolean
+}) {
+  const { plant, tasks, diagnoses } = data
+  const rgb = parseRgb(plant.colorRgb)
+  const accentColor = rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : '#3ECF6E'
+  const accentSoft = rgb ? `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.15)` : 'rgba(62,207,110,0.15)'
+
+  const pending = tasks.filter((t) => t.status === 'pending').sort(
+    (a, b) => new Date(a.scheduledFor).getTime() - new Date(b.scheduledFor).getTime()
+  )
+  const done = tasks.filter((t) => t.status !== 'pending')
+  const lastDiagnosis = diagnoses[0] ?? null
+
+  const lightLabel = { low: 'Luz baja', medium: 'Luz media', high: 'Luz alta' }[plant.lightLevel]
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Back */}
+      <button onClick={onBack} className="flex items-center gap-2 text-sm text-muted hover:text-strong transition cursor-pointer w-fit">
+        <span className="text-base">←</span> Volver al jardín
+      </button>
+
+      {/* Hero */}
+      <div className="relative overflow-hidden rounded-2xl border border-border"
+        style={{ background: `linear-gradient(135deg, ${accentSoft} 0%, rgba(0,0,0,0) 60%)` }}>
+        <div className="absolute top-0 right-0 h-40 w-40 rounded-full opacity-10 blur-3xl"
+          style={{ background: accentColor, transform: 'translate(30%, -30%)' }} />
+        <div className="relative p-6 flex items-start gap-4">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl text-4xl border border-border"
+            style={{ backgroundColor: accentSoft }}>
+            🪴
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-2xl font-bold text-hero leading-tight">{plant.name}</h2>
+            <p className="mt-0.5 text-sm italic text-muted">{plant.speciesGuess}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface/60 px-2.5 py-1 text-xs text-muted">
+                📍 {plant.location}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface/60 px-2.5 py-1 text-xs text-muted">
+                ☀️ {lightLabel}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface/60 px-2.5 py-1 text-xs text-muted">
+                📅 {new Date(plant.createdAt).toLocaleDateString('es-AR')}
+              </span>
+            </div>
+          </div>
+          {lastDiagnosis && (
+            <div className="shrink-0">
+              <Badge color={SEVERITY_COLOR[lastDiagnosis.severity]}>
+                {SEVERITY_LABEL[lastDiagnosis.severity]}
+              </Badge>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+        {/* LEFT: steps + done tasks */}
+        <div className="flex flex-col gap-4">
+          {/* Pending steps */}
+          <Card>
+            <CardTitle>Pasos a seguir</CardTitle>
+            {pending.length ? (
+              <div className="flex flex-col gap-3">
+                {pending.map((task, i) => (
+                  <div key={task.id} className="flex gap-4">
+                    {/* Step number */}
+                    <div className="flex flex-col items-center gap-1 shrink-0">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold"
+                        style={{ background: accentSoft, color: accentColor, border: `1.5px solid ${accentColor}` }}>
+                        {i + 1}
+                      </div>
+                      {i < pending.length - 1 && (
+                        <div className="w-px flex-1 bg-border" style={{ minHeight: 16 }} />
+                      )}
+                    </div>
+                    {/* Task card */}
+                    <div className="flex-1 pb-3">
+                      <div className="rounded-xl border border-border bg-surface-alt p-4 hover:border-border-bright transition">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                              <span className="text-base">{CATEGORY_ICON[task.category]}</span>
+                              <p className="font-semibold text-strong">{task.title}</p>
+                              {task.priority >= 4 && <Badge color="danger">Urgente</Badge>}
+                              {task.priority === 3 && <Badge color="warning">Media</Badge>}
+                            </div>
+                            <p className="text-sm leading-relaxed text-muted">{task.details}</p>
+                            <p className="mt-2 text-xs text-dim">
+                              Programada: {new Date(task.scheduledFor).toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' })}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex gap-2">
+                          <Btn size="sm" disabled={busy} onClick={() => onTaskDone(task.id)}>✓ Hecha</Btn>
+                          <Btn size="sm" variant="secondary" disabled={busy} onClick={() => onTaskSkip(task.id)}>Omitir</Btn>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState emoji="✅" text="No hay tareas pendientes. ¡Todo al día!" />
+            )}
+          </Card>
+
+          {/* Done / skipped */}
+          {done.length > 0 && (
+            <Card>
+              <CardTitle>Historial</CardTitle>
+              <div className="flex flex-col gap-2">
+                {done.map((task) => (
+                  <div key={task.id} className="flex items-start gap-3 rounded-xl border border-border bg-surface-alt/50 p-3 opacity-60">
+                    <span className={`mt-0.5 text-sm font-bold ${task.status === 'done' ? 'text-primary' : 'text-dim'}`}>
+                      {task.status === 'done' ? '✓' : '–'}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">{CATEGORY_ICON[task.category]}</span>
+                        <p className="text-sm font-medium text-strong">{task.title}</p>
+                        <Badge color="muted">{task.status === 'done' ? 'hecha' : 'omitida'}</Badge>
+                      </div>
+                      <p className="mt-0.5 text-xs text-dim">
+                        {new Date(task.scheduledFor).toLocaleDateString('es-AR', { dateStyle: 'medium' })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+        </div>
+
+        {/* RIGHT: diagnosis */}
+        <div className="flex flex-col gap-4">
+          {lastDiagnosis ? (
+            <Card>
+              <CardTitle>Último diagnóstico</CardTitle>
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center gap-3">
+                  <Badge color={SEVERITY_COLOR[lastDiagnosis.severity]}>
+                    {SEVERITY_LABEL[lastDiagnosis.severity]}
+                  </Badge>
+                  <span className="text-xs text-dim">
+                    {Math.round(lastDiagnosis.confidence * 100)}% confianza
+                  </span>
+                  <span className="ml-auto text-xs text-dim">
+                    {new Date(lastDiagnosis.createdAt).toLocaleDateString('es-AR')}
+                  </span>
+                </div>
+
+                <p className="text-sm leading-relaxed text-text">{lastDiagnosis.summary}</p>
+
+                {lastDiagnosis.detectedIssues.length > 0 && (
+                  <div>
+                    <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.15em] text-muted">Problemas detectados</p>
+                    <ul className="flex flex-col gap-1.5">
+                      {lastDiagnosis.detectedIssues.map((issue, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-text">
+                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
+                          {issue}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {lastDiagnosis.recommendations.length > 0 && (
+                  <div>
+                    <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.15em] text-muted">Recomendaciones</p>
+                    <ul className="flex flex-col gap-2">
+                      {lastDiagnosis.recommendations.map((rec, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-muted">
+                          <span className="mt-1 h-1 w-1 shrink-0 rounded-full" style={{ backgroundColor: accentColor }} />
+                          {rec}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </Card>
+          ) : (
+            <Card>
+              <CardTitle>Diagnóstico</CardTitle>
+              <EmptyState emoji="🔬" text="Sin diagnóstico aún. Subí una foto para analizarla con IA." />
+            </Card>
+          )}
+
+          {/* All diagnoses count */}
+          {diagnoses.length > 1 && (
+            <p className="text-xs text-dim text-center">
+              +{diagnoses.length - 1} diagnóstico{diagnoses.length - 1 > 1 ? 's' : ''} anterior{diagnoses.length - 1 > 1 ? 'es' : ''}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ─── Garden background layer ────────────────────────────────────────────── */
 
 function GardenBg({ background }: { background: string }) {
@@ -340,13 +575,17 @@ function LoginScreen({
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('home')
-  const [authToken, setAuthToken] = useState<string | null>(null)
-  const [user, setUser] = useState<User | null>(null)
+  const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem('midori_token'))
+  const [user, setUser] = useState<User | null>(() => {
+    try { return JSON.parse(localStorage.getItem('midori_user') ?? 'null') } catch { return null }
+  })
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [tasksToday, setTasksToday] = useState<CareTask[]>([])
   const [progress, setProgress] = useState<ProgressSnapshot[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const [language, setLanguage] = useState<Language>(() => (localStorage.getItem('midori_lang') as Language) ?? 'es')
 
   const [plantName, setPlantName] = useState('')
   const [speciesGuess, setSpeciesGuess] = useState('')
@@ -357,6 +596,8 @@ export default function App() {
   const [context, setContext] = useState('')
   const [note, setNote] = useState('')
   const [diagnosisResult, setDiagnosisResult] = useState('')
+  const [selectedPlant, setSelectedPlant] = useState<{ plant: Plant; tasks: CareTask[]; diagnoses: Diagnosis[] } | null>(null)
+  const [loadingPlant, setLoadingPlant] = useState(false)
 
   // Garden background derived from plants' colorRgb — no extra requests
   const gardenBackground = useMemo(() => {
@@ -385,12 +626,16 @@ export default function App() {
 
   const handleLogin = async (email: string, password: string) => {
     const result = await api.login(email, password)
+    localStorage.setItem('midori_token', result.token)
+    localStorage.setItem('midori_user', JSON.stringify(result.user))
     setAuthToken(result.token)
     setUser(result.user)
   }
 
   const handleRegister = async (email: string, name: string, password: string) => {
     const result = await api.register(email, name, password)
+    localStorage.setItem('midori_token', result.token)
+    localStorage.setItem('midori_user', JSON.stringify(result.user))
     setAuthToken(result.token)
     setUser(result.user)
   }
@@ -428,6 +673,7 @@ export default function App() {
           imageUrl,
           context: context.trim() || 'Foto inicial de alta de planta para diagnóstico visual.',
           note: note.trim() || undefined,
+          language,
         })
         setDiagnosisResult(
           `${diagnosis.diagnosis.summary}\n\nTareas generadas: ${diagnosis.generatedTasks.length}`,
@@ -445,12 +691,30 @@ export default function App() {
     }
   }
 
+  const handleSelectPlant = async (plantId: string) => {
+    if (!authToken) return
+    try {
+      setLoadingPlant(true)
+      const data = await api.getPlant(authToken, plantId)
+      setSelectedPlant(data)
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setLoadingPlant(false)
+    }
+  }
+
   const handleTaskStatus = async (taskId: string, status: CareTask['status']) => {
     if (!authToken) return
     try {
       setBusy(true)
       await api.updateTaskStatus(authToken, taskId, status)
       await refreshData(authToken)
+      // Refresh plant detail if open
+      if (selectedPlant) {
+        const data = await api.getPlant(authToken, selectedPlant.plant.id)
+        setSelectedPlant(data)
+      }
     } catch (err) {
       setError(String(err))
     } finally {
@@ -472,6 +736,7 @@ export default function App() {
     { key: 'home', label: 'Inicio' },
     { key: 'tasks', label: 'Tareas' },
     { key: 'progress', label: 'Progreso' },
+    { key: 'settings', label: 'Ajustes' },
   ]
 
   return (
@@ -499,17 +764,17 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-                <Btn variant="ghost" size="sm" onClick={() => { setAuthToken(null); setUser(null); setDashboard(null) }}>
+                <Btn variant="ghost" size="sm" onClick={() => { localStorage.removeItem('midori_token'); localStorage.removeItem('midori_user'); setAuthToken(null); setUser(null); setDashboard(null) }}>
                   Salir
                 </Btn>
               </div>
             </div>
             <nav className="mt-4 flex gap-1 border-t border-border pt-1">
               {tabs.map((t) => (
-                <button key={t.key} onClick={() => setTab(t.key)}
-                  className={`relative px-4 py-2 text-sm font-semibold tracking-wide transition cursor-pointer ${tab === t.key ? 'text-primary' : 'text-muted hover:text-strong'}`}>
+                <button key={t.key} onClick={() => { setTab(t.key); setSelectedPlant(null) }}
+                  className={`relative px-4 py-2 text-sm font-semibold tracking-wide transition cursor-pointer ${tab === t.key && !selectedPlant ? 'text-primary' : 'text-muted hover:text-strong'}`}>
                   {t.label}
-                  {tab === t.key && <span className="absolute bottom-0 left-3 right-3 h-[2px] rounded-full bg-primary" />}
+                  {tab === t.key && !selectedPlant && <span className="absolute bottom-0 left-3 right-3 h-[2px] rounded-full bg-primary" />}
                 </button>
               ))}
             </nav>
@@ -525,8 +790,24 @@ export default function App() {
             </div>
           )}
 
+          {/* ── PLANT DETAIL PAGE ── */}
+          {loadingPlant && (
+            <div className="flex items-center justify-center py-24">
+              <p className="text-sm text-muted">Cargando planta...</p>
+            </div>
+          )}
+          {selectedPlant && !loadingPlant && (
+            <PlantDetailPage
+              data={selectedPlant}
+              onBack={() => setSelectedPlant(null)}
+              onTaskDone={(id) => handleTaskStatus(id, 'done')}
+              onTaskSkip={(id) => handleTaskStatus(id, 'skipped')}
+              busy={busy}
+            />
+          )}
+
           {/* ── HOME ── */}
-          {tab === 'home' && (
+          {!selectedPlant && !loadingPlant && tab === 'home' && (
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardTitle>Agregar planta</CardTitle>
@@ -590,7 +871,9 @@ export default function App() {
                     {dashboard.plants.map((plant) => {
                       const rgb = parseRgb(plant.colorRgb)
                       return (
-                        <div key={plant.id} className="flex items-center gap-3 rounded-xl border border-border bg-surface-alt p-3 hover:border-border-bright transition">
+                        <button key={plant.id} type="button"
+                          onClick={() => handleSelectPlant(plant.id)}
+                          className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface-alt p-3 hover:border-border-bright hover:bg-surface-raised transition text-left cursor-pointer">
                           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xl"
                             style={{ backgroundColor: rgb ? `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.25)` : undefined }}>
                             🪴
@@ -600,8 +883,11 @@ export default function App() {
                             <p className="truncate text-xs italic text-muted">{plant.speciesGuess}</p>
                             <p className="text-xs text-dim">{plant.location}</p>
                           </div>
-                          <Badge color="muted">{plant.lightLevel}</Badge>
-                        </div>
+                          <div className="flex items-center gap-2">
+                            <Badge color="muted">{plant.lightLevel}</Badge>
+                            <span className="text-muted text-sm">›</span>
+                          </div>
+                        </button>
                       )
                     })}
                   </div>
@@ -626,7 +912,7 @@ export default function App() {
           )}
 
           {/* ── TASKS ── */}
-          {tab === 'tasks' && (
+          {!selectedPlant && !loadingPlant && tab === 'tasks' && (
             <div className="flex flex-col gap-4">
               <Card>
                 <CardTitle>Agenda de hoy</CardTitle>
@@ -666,7 +952,7 @@ export default function App() {
           )}
 
           {/* ── PROGRESS ── */}
-          {tab === 'progress' && (
+          {!selectedPlant && !loadingPlant && tab === 'progress' && (
             <div className="flex flex-col gap-4">
               <Card>
                 <CardTitle>Progreso semanal</CardTitle>
@@ -718,6 +1004,45 @@ export default function App() {
                 ) : (
                   <EmptyState emoji="📊" text="Aún no hay datos de progreso." />
                 )}
+              </Card>
+            </div>
+          )}
+          {/* ── SETTINGS ── */}
+          {!selectedPlant && !loadingPlant && tab === 'settings' && (
+            <div className="flex flex-col gap-4 max-w-md">
+              <Card>
+                <CardTitle>Ajustes</CardTitle>
+                <div className="flex flex-col gap-6">
+                  <div className="flex flex-col gap-3">
+                    <Label>Idioma del diagnóstico IA</Label>
+                    <p className="text-xs text-muted -mt-1">El resumen, problemas detectados y recomendaciones se generarán en el idioma seleccionado.</p>
+                    <div className="flex flex-col gap-2">
+                      {(Object.entries(LANGUAGE_LABELS) as [Language, string][]).map(([code, label]) => (
+                        <button key={code} type="button"
+                          onClick={() => { setLanguage(code); localStorage.setItem('midori_lang', code) }}
+                          className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium transition cursor-pointer text-left ${
+                            language === code
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border bg-surface-alt text-text hover:border-border-bright'
+                          }`}>
+                          <span className={`h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${language === code ? 'border-primary' : 'border-border'}`}>
+                            {language === code && <span className="h-2 w-2 rounded-full bg-primary" />}
+                          </span>
+                          {label}
+                          {code === 'es' && <span className="ml-auto text-xs text-dim">Por defecto</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="border-t border-border pt-4 flex flex-col gap-2">
+                    <Label>Cuenta</Label>
+                    <p className="text-sm text-muted">{user?.email}</p>
+                    <Btn variant="secondary" size="sm" className="w-fit mt-1"
+                      onClick={() => { localStorage.removeItem('midori_token'); localStorage.removeItem('midori_user'); setAuthToken(null); setUser(null); setDashboard(null) }}>
+                      Cerrar sesión
+                    </Btn>
+                  </div>
+                </div>
               </Card>
             </div>
           )}

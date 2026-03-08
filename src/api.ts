@@ -1,6 +1,6 @@
 import type { CareTask, DashboardData, Diagnosis, Plant, ProgressSnapshot, User } from './types'
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:4000').replace(/\/$/, '')
+const API_BASE_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8080').replace(/\/$/, '')
 
 type LoginResponse = {
   token: string
@@ -63,7 +63,7 @@ export const api = {
   diagnosePlant(
     token: string,
     plantId: string,
-    payload: { imageUrl: string; note?: string; context: string },
+    payload: { imageUrl: string; note?: string; context: string; language?: string },
   ) {
     return request<{ diagnosis: Diagnosis; generatedTasks: CareTask[] }>(
       `/plants/${plantId}/diagnose`,
