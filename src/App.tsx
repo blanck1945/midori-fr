@@ -722,11 +722,25 @@ export default function App() {
     }
   }
 
+  const todayStart = useMemo(() => {
+    const d = new Date(); d.setHours(0, 0, 0, 0); return d
+  }, [])
+
+  const overdueTasks = useMemo(
+    () => tasksToday.filter((t) => t.status === 'pending' && new Date(t.scheduledFor) < todayStart),
+    [tasksToday, todayStart],
+  )
+
+  const todayPendingTasks = useMemo(
+    () => tasksToday.filter((t) => new Date(t.scheduledFor) >= todayStart),
+    [tasksToday, todayStart],
+  )
+
   const headerStats = useMemo(() => [
     { label: 'Plantas', value: dashboard?.plants.length ?? 0 },
-    { label: 'Tareas hoy', value: tasksToday.length },
-    { label: 'Alertas', value: dashboard?.criticalAlerts.length ?? 0 },
-  ], [dashboard?.plants.length, tasksToday.length, dashboard?.criticalAlerts.length])
+    { label: 'Tareas hoy', value: todayPendingTasks.length },
+    { label: overdueTasks.length > 0 ? 'Vencidas' : 'Alertas', value: overdueTasks.length > 0 ? overdueTasks.length : dashboard?.criticalAlerts.length ?? 0, overdue: overdueTasks.length > 0 },
+  ], [dashboard?.plants.length, todayPendingTasks.length, overdueTasks.length, dashboard?.criticalAlerts.length])
 
   if (!authToken) {
     return <LoginScreen onLogin={handleLogin} onRegister={handleRegister} gardenBackground={gardenBackground} />
@@ -758,9 +772,9 @@ export default function App() {
               <div className="flex items-center gap-3">
                 <div className="hidden gap-2 sm:flex">
                   {headerStats.map((s) => (
-                    <div key={s.label} className="rounded-lg border border-border bg-surface-alt px-3 py-1.5 text-center">
-                      <p className="text-base font-bold leading-none text-strong">{s.value}</p>
-                      <p className="mt-0.5 text-[10px] text-muted">{s.label}</p>
+                    <div key={s.label} className={`rounded-lg border px-3 py-1.5 text-center ${s.overdue ? 'border-danger/40 bg-danger/10' : 'border-border bg-surface-alt'}`}>
+                      <p className={`text-base font-bold leading-none ${s.overdue ? 'text-danger' : 'text-strong'}`}>{s.value}</p>
+                      <p className={`mt-0.5 text-[10px] ${s.overdue ? 'text-danger/70' : 'text-muted'}`}>{s.label}</p>
                     </div>
                   ))}
                 </div>
@@ -773,7 +787,14 @@ export default function App() {
               {tabs.map((t) => (
                 <button key={t.key} onClick={() => { setTab(t.key); setSelectedPlant(null) }}
                   className={`relative px-4 py-2 text-sm font-semibold tracking-wide transition cursor-pointer ${tab === t.key && !selectedPlant ? 'text-primary' : 'text-muted hover:text-strong'}`}>
-                  {t.label}
+                  <span className="flex items-center gap-1.5">
+                    {t.label}
+                    {t.key === 'tasks' && overdueTasks.length > 0 && (
+                      <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
+                        {overdueTasks.length}
+                      </span>
+                    )}
+                  </span>
                   {tab === t.key && !selectedPlant && <span className="absolute bottom-0 left-3 right-3 h-[2px] rounded-full bg-primary" />}
                 </button>
               ))}
@@ -914,28 +935,53 @@ export default function App() {
           {/* ── TASKS ── */}
           {!selectedPlant && !loadingPlant && tab === 'tasks' && (
             <div className="flex flex-col gap-4">
+              {/* Overdue */}
+              {overdueTasks.length > 0 && (
+                <div className="rounded-2xl border border-danger/40 bg-danger/5 overflow-hidden shadow-[0_6px_24px_rgba(0,0,0,0.4)]">
+                  <div className="flex items-center gap-2 border-b border-danger/20 bg-danger/10 px-5 py-3">
+                    <span className="h-2 w-2 rounded-full bg-danger animate-pulse" />
+                    <p className="text-sm font-bold text-danger">Tareas pendientes — {overdueTasks.length} sin completar</p>
+                  </div>
+                  <div className="flex flex-col gap-3 p-5">
+                    {overdueTasks.map((task) => (
+                      <div key={task.id} className="rounded-xl border border-danger/30 bg-surface-alt p-4">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <p className="font-semibold text-strong">{task.title}</p>
+                          <Badge color="danger">Vencida</Badge>
+                        </div>
+                        <p className="text-sm leading-relaxed text-muted">{task.details}</p>
+                        <p className="mt-1.5 text-xs text-danger/70">
+                          Programada: {new Date(task.scheduledFor).toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' })}
+                        </p>
+                        <div className="mt-3 flex gap-2">
+                          <Btn size="sm" onClick={() => handleTaskStatus(task.id, 'done')} disabled={busy}>✓ Hecha</Btn>
+                          <Btn size="sm" variant="secondary" onClick={() => handleTaskStatus(task.id, 'skipped')} disabled={busy}>Omitir</Btn>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Today */}
               <Card>
                 <CardTitle>Agenda de hoy</CardTitle>
-                {tasksToday.length ? (
+                {todayPendingTasks.length ? (
                   <div className="flex flex-col gap-3">
-                    {tasksToday.map((task) => {
+                    {todayPendingTasks.map((task) => {
                       const priorityColor = task.priority >= 4 ? 'danger' : task.priority >= 3 ? 'warning' : 'muted'
                       return (
                         <div key={task.id} className="rounded-xl border border-border bg-surface-alt p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="font-semibold text-strong">{task.title}</p>
-                                <Badge color={priorityColor as 'danger' | 'warning' | 'muted'}>
-                                  {task.priority >= 4 ? 'alta' : task.priority >= 3 ? 'media' : 'baja'}
-                                </Badge>
-                              </div>
-                              <p className="mt-1 text-sm leading-relaxed text-muted">{task.details}</p>
-                              <p className="mt-2 text-xs text-dim">
-                                {new Date(task.scheduledFor).toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' })}
-                              </p>
-                            </div>
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <p className="font-semibold text-strong">{task.title}</p>
+                            <Badge color={priorityColor as 'danger' | 'warning' | 'muted'}>
+                              {task.priority >= 4 ? 'alta' : task.priority >= 3 ? 'media' : 'baja'}
+                            </Badge>
                           </div>
+                          <p className="text-sm leading-relaxed text-muted">{task.details}</p>
+                          <p className="mt-2 text-xs text-dim">
+                            {new Date(task.scheduledFor).toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' })}
+                          </p>
                           <div className="mt-3 flex gap-2">
                             <Btn size="sm" onClick={() => handleTaskStatus(task.id, 'done')} disabled={busy}>✓ Hecha</Btn>
                             <Btn size="sm" variant="secondary" onClick={() => handleTaskStatus(task.id, 'skipped')} disabled={busy}>Omitir</Btn>
